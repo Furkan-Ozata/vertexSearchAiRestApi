@@ -73,6 +73,9 @@ web_modules/
 # dotenv environment variables file
 .env
 
+# package-lock.json (npm)
+package-lock.json
+
 # parcel-bundler cache files
 .cache
 .parcel-cache
@@ -108,3 +111,8 @@ dist
 
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
+
+# GitHub specific files (e.g., workflows, issue templates)
+.github/
+
+
