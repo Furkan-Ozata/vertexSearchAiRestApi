@@ -5,15 +5,88 @@ const readline = require("readline").createInterface({
   output: process.stdout,
 });
 
-const API_URL = process.env.API_URL || "http://localhost:3000/search";
+const API_BASE_URL = process.env.API_URL
+  ? process.env.API_URL.replace("/search", "")
+  : "http://localhost:3000";
+const SEARCH_URL = `${API_BASE_URL}/search`;
+const SESSION_URL = `${API_BASE_URL}/session`;
+const SESSIONS_URL = `${API_BASE_URL}/sessions`;
 
-async function search(query) {
+// Global session durumu
+let currentSession = null;
+let turnNumber = 0;
+
+async function createSession(displayName) {
+  try {
+    const response = await axios.post(SESSION_URL, {
+      displayName:
+        displayName || `Sohbet ${new Date().toLocaleString("tr-TR")}`,
+      userPseudoId: `user_${Date.now()}`,
+    });
+    currentSession = response.data;
+    turnNumber = 0;
+    console.log(
+      `✅ Yeni sohbet oturumu oluşturuldu: ${currentSession.displayName}`
+    );
+    console.log(`📍 Oturum ID: ${currentSession.name}`);
+    return currentSession;
+  } catch (error) {
+    console.error(
+      "❌ Oturum oluşturulurken hata:",
+      error.response?.data || error.message
+    );
+    return null;
+  }
+}
+
+async function listSessions() {
+  try {
+    const response = await axios.get(SESSIONS_URL);
+    const sessions = response.data.sessions || [];
+
+    if (sessions.length === 0) {
+      console.log("📭 Henüz hiç oturum yok.");
+      return;
+    }
+
+    console.log("\n📋 Mevcut Oturumlar:");
+    sessions.forEach((session, index) => {
+      const isActive = currentSession && session.name === currentSession.name;
+      console.log(
+        `${isActive ? "👉" : "  "} ${index + 1}. ${session.displayName} (${
+          session.turnCount
+        } konuşma)`
+      );
+      console.log(`     ID: ${session.name.split("/").pop()}`);
+      console.log(
+        `     Oluşturma: ${new Date(session.created).toLocaleString("tr-TR")}`
+      );
+    });
+  } catch (error) {
+    console.error(
+      "❌ Oturumlar listelenirken hata:",
+      error.response?.data || error.message
+    );
+  }
+}
+
+async function search(query, useSession = true) {
   if (!query || query.trim() === "") {
     console.log("Lütfen bir soru sorun.");
     return null;
   }
+
   try {
-    const response = await axios.post(API_URL, { query });
+    const requestData = { query };
+
+    // Session kullanılacaksa ve mevcut bir session varsa ekle
+    if (useSession && currentSession) {
+      requestData.sessionId = currentSession.name;
+      requestData.searchResultPersistenceCount = 5;
+      turnNumber += 1;
+    }
+
+    const response = await axios.post(SEARCH_URL, requestData);
     return response.data;
   } catch (error) {
     if (error.response) {
@@ -36,6 +109,19 @@ async function search(query) {
 function displayResults(data) {
   if (!data) {
     return;
+  }
+
+  // Session bilgisini göster
+  if (data.sessionInfo) {
+    if (data.sessionInfo.isMultiTurn) {
+      console.log(
+        `\n🔗 Oturum: ${data.sessionInfo.sessionId.split("/").pop()} | Turn: ${
+          data.sessionInfo.turnNumber
+        }`
+      );
+    } else {
+      console.log("\n🔍 Tek seferlik arama (oturumsuz)");
+    }
   }
 
   if (data.summary && data.summary.summaryText) {
@@ -89,7 +175,15 @@ function displayResults(data) {
 }
 
 function askQuestion() {
-  readline.question("\n🧑 Sen: ", async (query) => {
+  // Prompt'u session durumuna göre güncelle
+  const prompt = currentSession
+    ? `\n🧑 Sen (Oturum: ${currentSession.displayName}): `
+    : "\n🧑 Sen (Oturumsuz): ";
+
+  readline.question(prompt, async (input) => {
+    const query = input.trim();
+
+    // Komutları kontrol et
     if (
       query.toLowerCase() === "exit" ||
       query.toLowerCase() === "quit" ||
@@ -98,15 +192,86 @@ function askQuestion() {
       readline.close();
       return;
     }
+
+    // Yeni oturum oluştur komutu
+    if (query.startsWith("/yeni") || query.startsWith("/new")) {
+      const parts = query.split(" ");
+      const sessionName = parts.slice(1).join(" ") || undefined;
+      await createSession(sessionName);
+      askQuestion();
+      return;
+    }
+
+    // Oturumları listele
+    if (query === "/list" || query === "/oturumlar") {
+      await listSessions();
+      askQuestion();
+      return;
+    }
+
+    // Oturumsuz arama
+    if (query.startsWith("/single") || query.startsWith("/tek")) {
+      const actualQuery = query.replace(/^\/(?:single|tek)\s*/, "");
+      if (actualQuery) {
+        console.log("🧠 Oturumsuz arama yapıyorum...");
+        const results = await search(actualQuery, false);
+        displayResults(results);
+      } else {
+        console.log("Lütfen aramak istediğiniz metni yazın: /tek <soru>");
+      }
+      askQuestion();
+      return;
+    }
+
+    // Yardım
+    if (query === "/help" || query === "/yardım") {
+      showHelp();
+      askQuestion();
+      return;
+    }
+
+    // Normal soru sorma
+    if (query === "") {
+      console.log(
+        "Lütfen bir soru sorun veya komut kullanın. Yardım için /help yazın."
+      );
+      askQuestion();
+      return;
+    }
+
     console.log("🧠 Düşünüyorum...");
-    const results = await search(query);
+    const results = await search(query, true);
     displayResults(results);
     askQuestion(); // Ask another question
   });
 }
 
-console.log("Vertex AI Arama Motoru CLI İstemcisi");
-console.log(
-  "Soru sormaya başlayın veya çıkmak için 'exit', 'quit' ya da 'çıkış' yazın."
-);
-askQuestion();
+function showHelp() {
+  console.log("\n📖 Kullanılabilir Komutlar:");
+  console.log("  /yeni [isim]       - Yeni konuşma oturumu oluştur");
+  console.log("  /oturumlar         - Mevcut oturumları listele");
+  console.log("  /tek <soru>        - Oturumsuz tek arama yap");
+  console.log("  /help              - Bu yardım menüsünü göster");
+  console.log("  exit/quit/çıkış    - Programdan çık");
+  console.log(
+    "\n💡 İpucu: Oturum oluşturduktan sonra sorularınız konuşma geçmişi ile birlikte değerlendirilir."
+  );
+}
+
+async function startApp() {
+  console.log("🚀 Vertex AI Multi-Turn Arama Motoru CLI İstemcisi");
+  console.log("====================================================");
+  console.log("✨ Yeni Özellikler:");
+  console.log("   🔗 Multi-turn konuşma desteği");
+  console.log("   📝 Oturum yönetimi");
+  console.log("   🧠 Konuşma geçmişi ile bağlamsal aramalar");
+  console.log("\n💡 Başlamak için:");
+  console.log("   - Önce '/yeni' yazarak bir oturum oluşturun");
+  console.log("   - Veya direkt soru sorarak oturumsuz arama yapın");
+  console.log("   - Yardım için '/help' yazın");
+  console.log("\n" + "=".repeat(50));
+
+  askQuestion();
+}
+
+startApp();

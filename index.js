@@ -8,8 +8,116 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// Session yönetimi için basit in-memory storage
+const sessionStore = new Map();
+
+// Session oluşturma endpoint'i
+app.post("/session", async (req, res) => {
+  const { userPseudoId, displayName } = req.body;
+
+  try {
+    const gcloudToken = await getGcloudAuthToken();
+    const projectId = process.env.PROJECT_ID;
+    const location = process.env.LOCATION;
+    const collectionId = process.env.COLLECTION_ID;
+    const engineId = process.env.ENGINE_ID;
+
+    // Session oluşturma URL'si
+    const sessionUrl = `https://discoveryengine.googleapis.com/v1/projects/${projectId}/locations/${location}/collections/${collectionId}/engines/${engineId}/sessions`;
+
+    console.log("Creating new session:", sessionUrl);
+
+    const sessionData = {
+      userPseudoId: userPseudoId || `user_${Date.now()}`,
+      displayName:
+        displayName || `Session ${new Date().toLocaleString("tr-TR")}`,
+    };
+
+    const response = await axios({
+      method: "post",
+      url: sessionUrl,
+      headers: {
+        Authorization: `Bearer ${gcloudToken}`,
+        "Content-Type": "application/json",
+      },
+      data: sessionData,
+    });
+
+    // Session'ı local storage'da da saklayalım
+    const sessionId = response.data.name;
+    sessionStore.set(sessionId, {
+      ...response.data,
+      turnCount: 0,
+      created: new Date().toISOString(),
+    });
+
+    console.log("Session created successfully:", sessionId);
+    res.json(response.data);
+  } catch (err) {
+    console.error("Error creating session:", err);
+    const errorMessage = err.response
+      ? `API Error: ${err.response.status} - ${JSON.stringify(
+          err.response.data
+        )}`
+      : err.message;
+
+    res.status(err.response?.status || 500).json({
+      error: "Error creating session",
+      details: errorMessage,
+    });
+  }
+});
+
+// Session listesi
+app.get("/sessions", (req, res) => {
+  const sessions = Array.from(sessionStore.values()).map((session) => ({
+    name: session.name,
+    displayName: session.displayName,
+    userPseudoId: session.userPseudoId,
+    turnCount: session.turnCount,
+    created: session.created,
+    state: session.state,
+  }));
+
+  res.json({ sessions });
+});
+
+// Tek session bilgisi
+app.get("/session/:sessionId", async (req, res) => {
+  const sessionId = req.params.sessionId;
+
+  try {
+    const gcloudToken = await getGcloudAuthToken();
+
+    // Google API'den session bilgisini çek
+    const sessionUrl = `https://discoveryengine.googleapis.com/v1/${sessionId}`;
+
+    const response = await axios({
+      method: "get",
+      url: sessionUrl,
+      headers: {
+        Authorization: `Bearer ${gcloudToken}`,
+      },
+    });
+
+    res.json(response.data);
+  } catch (err) {
+    console.error("Error getting session:", err);
+    const errorMessage = err.response
+      ? `API Error: ${err.response.status} - ${JSON.stringify(
+          err.response.data
+        )}`
+      : err.message;
+
+    res.status(err.response?.status || 500).json({
+      error: "Error getting session",
+      details: errorMessage,
+    });
+  }
+});
+
 app.post("/search", async (req, res) => {
-  const query = req.body.query;
+  const { query, sessionId, searchResultPersistenceCount = 5 } = req.body;
 
   if (!query) {
     return res.status(400).json({ error: "Query is required" });
@@ -31,6 +139,60 @@ app.post("/search", async (req, res) => {
 
     console.log("Calling Discovery Engine API:", discoveryEngineUrl);
 
+    // Search request data'sını hazırla
+    const searchData = {
+      query: query,
+      pageSize: 10,
+      languageCode: languageCode,
+      userInfo: {
+        timeZone: timeZone,
+      },
+      contentSearchSpec: {
+        snippetSpec: {
+          returnSnippet: true,
+        },
+        summarySpec: {
+          useSemanticChunks: true,
+          includeCitations: true,
+          summaryResultCount: 3,
+          modelSpec: {
+            version: "stable",
+          },
+          modelPromptSpec: {
+            preamble: preamble,
+          },
+        },
+      },
+    };
+
+    // Eğer sessionId varsa, sessionSpec'i ekleyelim
+    if (sessionId) {
+      // Yeni query ID oluştur
+      const queryId = `query_${Date.now()}_${Math.random()
+        .toString(36)
+        .substr(2, 9)}`;
+
+      searchData.session = sessionId;
+      searchData.sessionSpec = {
+        queryId: queryId,
+        searchResultPersistenceCount: searchResultPersistenceCount,
+      };
+
+      // Local storage'da session bilgisini güncelle
+      if (sessionStore.has(sessionId)) {
+        const sessionInfo = sessionStore.get(sessionId);
+        sessionInfo.turnCount += 1;
+        sessionInfo.lastQuery = query;
+        sessionInfo.lastQueryId = queryId;
+        sessionInfo.updated = new Date().toISOString();
+        sessionStore.set(sessionId, sessionInfo);
+      }
+
+      console.log(
+        `Multi-turn search with session: ${sessionId}, queryId: ${queryId}`
+      );
+    }
+
     const response = await axios({
       method: "post",
       url: discoveryEngineUrl,
@@ -38,33 +200,25 @@ app.post("/search", async (req, res) => {
         Authorization: `Bearer ${gcloudToken}`,
         "Content-Type": "application/json",
       },
-      data: {
-        query: query,
-        pageSize: 10,
-        languageCode: languageCode,
-        userInfo: {
-          timeZone: timeZone,
-        },
-        contentSearchSpec: {
-          snippetSpec: {
-            returnSnippet: true,
-          },
-          summarySpec: {
-            useSemanticChunks: true,
-            includeCitations: true,
-            summaryResultCount: 3,
-            modelSpec: {
-              version: "stable",
-            },
-            modelPromptSpec: {
-              preamble: preamble,
-            },
-          },
-        },
-      },
+      data: searchData,
     });
 
-    res.json(response.data);
+    // Response'a session bilgisini de ekleyelim
+    const responseData = {
+      ...response.data,
+      sessionInfo: sessionId
+        ? {
+            sessionId: sessionId,
+            queryId: searchData.sessionSpec?.queryId,
+            turnNumber: sessionStore.get(sessionId)?.turnCount || 0,
+            isMultiTurn: true,
+          }
+        : {
+            isMultiTurn: false,
+          },
+    };
+
+    res.json(responseData);
   } catch (err) {
     console.error("Server error during API request:", err);
 

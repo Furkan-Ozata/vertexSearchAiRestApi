@@ -1,16 +1,30 @@
-# Vertex AI Search REST API
+# Vertex AI Search REST API - Multi-Turn Konuşma Desteği
 
-Bu proje, Google Cloud Vertex AI Search (Discovery Engine API) ile etkileşime geçen basit bir REST API ve interaktif bir komut satırı istemcisi içerir. API, kullanıcı sorguları ile Google Cloud Vertex AI Search'e istek gönderir ve sonuçları formatlı bir şekilde döner.
+Bu proje, Google Cloud Vertex AI Search (Discovery Engine API) ile etkileşime geçen gelişmiş bir REST API ve interaktif komut satırı istemcisi içerir. API, hem tek seferlik aramalar hem de multi-turn konuşma oturumları ile Google Cloud Vertex AI Search'e istek gönderir ve sonuçları formatlı bir şekilde döner.
+
+## 🆕 Yeni Özellikler
+
+### Multi-Turn Search (Çok Turlu Arama)
+
+- **Konuşma Oturumları**: Birden fazla soruyu art arda sorarak bağlamsal aramalar yapın
+- **SessionSpec API**: Google Cloud'un SessionSpec özelliği ile arama sonuçlarını oturum boyunca persist edin
+- **Oturum Yönetimi**: Oturum oluşturma, listeleme ve takip etme
+- **Bağlamsal Anlayış**: Önceki sorular ve cevapların bağlamında yeni aramalar
+
+### Gelişmiş API Endpoints
+
+- `POST /search` - Tek seferlik arama veya oturum bazlı arama
+- `POST /session` - Yeni konuşma oturumu oluşturma
+- `GET /sessions` - Mevcut oturumları listeleme
+- `GET /session/:sessionId` - Tek oturum detayları
 
 ## Proje Yapısı
-
-Projenin dosya yapısı aşağıdaki gibidir:
 
 ```
 vertexSearchAiRestApi/
 │
-├── index.js                # Ana API sunucu dosyası
-├── interactive-client.js   # Komut satırı istemcisi
+├── index.js                # Ana API sunucu dosyası (Multi-turn desteği ile)
+├── interactive-client.js   # Gelişmiş komut satırı istemcisi
 ├── .env                    # Çevre değişkenleri dosyası
 ├── package.json            # Npm paket yapılandırma dosyası
 └── README.md               # Proje dokümantasyonu
@@ -18,14 +32,23 @@ vertexSearchAiRestApi/
 
 ## Özellikler
 
+### Temel Özellikler
+
 - REST API ile Vertex AI Search sorguları gönderme
 - İki farklı kimlik doğrulama yöntemi:
   - Google Cloud SDK (gcloud) ile kimlik doğrulama
   - Service Account JSON ile kimlik doğrulama
 - Environment variables ile kolay yapılandırma
-- İnteraktif komut satırı istemcisi ile test etme kolaylığı
 - Axios kullanarak HTTP istekleri
 - Özetleme ve alıntı desteği
+
+### Gelişmiş Özellikler
+
+- **Multi-Turn Search**: Konuşma geçmişi ile bağlamsal aramalar
+- **Session Management**: Oturum oluşturma ve yönetimi
+- **SessionSpec Integration**: Google Cloud'un session API'si ile entegrasyon
+- **Turn Tracking**: Her konuşma turunu takip etme
+- **Interactive Commands**: Zengin komut satırı arayüzü
 
 ## Ön Gereksinimler
 
@@ -146,6 +169,17 @@ Executes a search query against the configured Vertex AI Search engine.
 
 **Example cURL request to the local API:**
 
+````bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  ## API Kullanımı
+
+API başlatıldıktan sonra aşağıdaki endpoint'leri kullanabilirsiniz:
+
+### 1. Tek Seferlik Arama (POST /search)
+
+Geleneksel tek seferlik arama yapmak için:
+
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
@@ -153,33 +187,177 @@ curl -X POST \
     "query": "What are the latest advancements in AI?"
   }' \
   http://localhost:3000/search
+````
+
+### 2. Oturum Oluşturma (POST /session)
+
+Multi-turn konuşma için önce bir oturum oluşturun:
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "AI Research Session",
+    "userPseudoId": "user_123"
+  }' \
+  http://localhost:3000/session
 ```
 
-**Success Response (200 OK):**
+**Başarılı Cevap:**
 
-The JSON response directly from the Vertex AI Search API. The structure will depend on your Vertex AI Search configuration and the results.
+```json
+{
+  "name": "projects/your-project/locations/global/collections/default_collection/engines/your-engine/sessions/session_id",
+  "displayName": "AI Research Session",
+  "userPseudoId": "user_123",
+  "state": "IN_PROGRESS",
+  "turns": [],
+  "startTime": "2025-05-25T10:00:00Z"
+}
+```
 
-**Error Responses:**
+### 3. Multi-Turn Arama (POST /search with sessionId)
 
-- `400 Bad Request`: If the `query` field is missing or empty in the request body.
-  ```json
-  { "error": "Query is required" }
-  ```
-- `500 Internal Server Error`: If there's an issue:
-  - Obtaining the gcloud authentication token.
-  - Executing the cURL command to Vertex AI.
-  - Parsing the response from Vertex AI.
-  - Other unexpected server-side errors.
-    The error message will provide more details.
-  ```json
-  { "error": "Failed to get gcloud auth token" }
-  // or
-  { "error": "Error executing search", "details": "..." }
-  // or
-  { "error": "Failed to parse search results", "details": "..." }
-  ```
+Oluşturulan oturumla bağlamsal arama yapın:
 
-## How it Works
+```bash
+# İlk soru
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What is artificial intelligence?",
+    "sessionId": "projects/your-project/locations/global/collections/default_collection/engines/your-engine/sessions/session_id",
+    "searchResultPersistenceCount": 5
+  }' \
+  http://localhost:3000/search
+
+# İkinci soru (önceki bağlamla)
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How does it differ from machine learning?",
+    "sessionId": "projects/your-project/locations/global/collections/default_collection/engines/your-engine/sessions/session_id",
+    "searchResultPersistenceCount": 5
+  }' \
+  http://localhost:3000/search
+```
+
+### 4. Oturumları Listeleme (GET /sessions)
+
+```bash
+curl http://localhost:3000/sessions
+```
+
+### 5. Tek Oturum Bilgisi (GET /session/:sessionId)
+
+```bash
+curl http://localhost:3000/session/session_id
+```
+
+## İnteraktif İstemci Kullanımı
+
+Komut satırı istemcisi ile kolay test edebilirsiniz:
+
+```bash
+node interactive-client.js
+```
+
+### İstemci Komutları
+
+- `/yeni [oturum_adı]` - Yeni konuşma oturumu oluştur
+- `/oturumlar` - Mevcut oturumları listele
+- `/tek <soru>` - Oturumsuz tek arama yap
+- `/help` - Yardım menüsünü göster
+- `exit/quit/çıkış` - Programdan çık
+
+### Örnek Kullanım Senaryosu
+
+```
+🚀 Vertex AI Multi-Turn Arama Motoru CLI İstemcisi
+====================================================
+
+🧑 Sen (Oturumsuz): /yeni AI Araştırması
+✅ Yeni sohbet oturumu oluşturuldu: AI Araştırması
+
+🧑 Sen (Oturum: AI Araştırması): Yapay zeka nedir?
+🧠 Düşünüyorum...
+🔗 Oturum: session_123 | Turn: 1
+🤖 Cevap: Yapay zeka (AI), makinelerin insan benzeri düşünme...
+
+🧑 Sen (Oturum: AI Araştırması): Peki makine öğrenmesi ile farkı nedir?
+🧠 Düşünüyorum...
+🔗 Oturum: session_123 | Turn: 2
+🤖 Cevap: Makine öğrenmesi, daha önce sorduğunuz yapay zekanın bir alt dalıdır...
+```
+
+## Nasıl Çalışır
+
+### Kimlik Doğrulama Akışı
+
+1. **İlk deneme**: `gcloud auth print-access-token` komutu ile Google Cloud CLI üzerinden token alınmaya çalışılır
+2. **Geri dönüş**: CLI başarısız olursa, `.env` dosyasındaki `SERVICE_ACCOUNT_JSON` ile servis hesabı kimlik doğrulaması yapılır
+3. **GoogleAuth Library**: `google-auth-library` kullanarak programatik kimlik doğrulama
+
+### Multi-Turn Search Akışı
+
+1. **Session Oluşturma**: `/session` endpoint'i ile Google Cloud'da yeni bir session oluşturulur
+2. **SessionSpec Kullanımı**: Her aramada `sessionId` ve `queryId` gönderilerek arama sonuçları persist edilir
+3. **Turn Tracking**: Her soru-cevap bir "turn" olarak kaydedilir ve bağlam korunur
+4. **Bağlamsal Arama**: Önceki sorular ve cevaplar sonraki aramalarda kullanılır
+
+### API Entegrasyonu
+
+- **Axios HTTP Client**: cURL yerine programatik HTTP istekleri
+- **v1alpha API**: Google Cloud Discovery Engine'in en güncel özelliklerini kullanır
+- **SessionSpec**: `queryId` ve `searchResultPersistenceCount` ile çok turlu aramalar
+- **Error Handling**: Kapsamlı hata yönetimi ve kullanıcı dostu mesajlar
+
+## Hata Çözüm
+
+### Kimlik Doğrulama Hataları
+
+```bash
+# gcloud CLI'nin kurulu ve authenticate olup olmadığını kontrol edin
+gcloud auth list
+
+# Gerekirse yeniden authenticate olun
+gcloud auth login
+
+# Service account key'i doğru formatta olup olmadığını kontrol edin
+echo $SERVICE_ACCOUNT_JSON | jq .
+```
+
+### API Hataları
+
+- **403 Forbidden**: Discovery Engine API'nin projenizde etkinleştirildiğinden emin olun
+- **404 Not Found**: PROJECT_ID, ENGINE_ID ve diğer ID'lerin doğru olduğunu kontrol edin
+- **Session Errors**: v1alpha endpoint'lerinin kullanıldığından emin olun
+
+### Yaygın Sorunlar
+
+1. **Service Account JSON**: JSON string'indeki tırnak işaretlerinin escape edildiğinden emin olun
+2. **Environment Variables**: .env dosyasının doğru yüklendiğini kontrol edin
+3. **API Versions**: Multi-turn özellik için v1alpha kullanılması gerekir
+
+## Katkıda Bulunma
+
+1. Bu repository'i fork edin
+2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
+3. Değişikliklerinizi commit edin (`git commit -m 'Add amazing feature'`)
+4. Branch'inizi push edin (`git push origin feature/amazing-feature`)
+5. Pull Request açın
+
+## Lisans
+
+Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için LICENSE dosyasına bakın.
+
+## İletişim
+
+Sorularınız için issue açabilir veya doğrudan iletişime geçebilirsiniz.
+
+---
+
+**Not**: Bu proje Google Cloud Vertex AI Search'ün multi-turn özelliğini kullanır. Bu özellik şu anda private GA aşamasındadır ve v1alpha/v1beta endpoint'leri gerektirir.
 
 1.  The API server listens for POST requests on the `/search` endpoint.
 2.  When a request is received, it validates that a `query` is present in the JSON body.
