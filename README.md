@@ -1,59 +1,124 @@
-# Vertex AI Search API
+# Vertex AI Search REST API
 
-This project provides a Node.js Express REST API to query Google Cloud Vertex AI Search.
+Bu proje, Google Cloud Vertex AI Search (Discovery Engine API) ile etkileşime geçen basit bir REST API ve interaktif bir komut satırı istemcisi içerir. API, kullanıcı sorguları ile Google Cloud Vertex AI Search'e istek gönderir ve sonuçları formatlı bir şekilde döner.
 
-## Prerequisites
+## Proje Yapısı
 
-- Node.js and npm installed (LTS version recommended).
-- Google Cloud SDK (`gcloud`) installed and authenticated. Ensure you have the necessary permissions to access Vertex AI Search.
+Projenin dosya yapısı aşağıdaki gibidir:
 
-## Setup
+```
+vertexSearchAiRestApi/
+│
+├── index.js                # Ana API sunucu dosyası
+├── interactive-client.js   # Komut satırı istemcisi
+├── .env                    # Çevre değişkenleri dosyası
+├── package.json            # Npm paket yapılandırma dosyası
+└── README.md               # Proje dokümantasyonu
+```
+
+## Özellikler
+
+- REST API ile Vertex AI Search sorguları gönderme
+- İki farklı kimlik doğrulama yöntemi:
+  - Google Cloud SDK (gcloud) ile kimlik doğrulama
+  - Service Account JSON ile kimlik doğrulama
+- Environment variables ile kolay yapılandırma
+- İnteraktif komut satırı istemcisi ile test etme kolaylığı
+- Axios kullanarak HTTP istekleri
+- Özetleme ve alıntı desteği
+
+## Ön Gereksinimler
+
+- Node.js ve npm (LTS sürümü önerilir)
+- Google Cloud hesabı
+- Vertex AI Search (Discovery Engine) etkinleştirilmiş proje
+- Aşağıdakilerden en az biri:
+  - Yüklü ve kimlik doğrulaması yapılmış Google Cloud SDK (`gcloud`)
+  - Service Account JSON kimlik bilgileri
 
 1.  **Clone the repository (if applicable) or download the project files.**
 
-    ```bash
-    # If cloning:
-    # git clone <repository-url>
-    # cd <repository-name>
-    ```
+    ## Kurulum
 
-2.  **Navigate to the project directory:**
-    If you haven't already, change to the project's root directory.
+### 1. Projeyi İndirme
 
-    ```bash
-    cd /path/to/your/project/vertexSearchAiRestApi
-    ```
+```bash
+# Repoyu klonlayın (eğer bir Git reposundan alıyorsanız)
+git clone <repository-url>
+cd vertexSearchAiRestApi
 
-    _(Replace `/path/to/your/project/vertexSearchAiRestApi` with the actual path to the project directory on your system.)_
+# Ya da arşivden çıkartın ve klasöre gidin
+cd vertexSearchAiRestApi
+```
 
-3.  **Install dependencies:**
+### 2. Bağımlılıkları Yükleme
 
-    ```bash
-    npm install
-    ```
+```bash
+npm install
+```
 
-4.  **Configure Environment Variables:**
-    Create a `.env` file in the root of the project. This file will store your Google Cloud project configuration and other sensitive details.
-    Copy the following content into your `.env` file and replace the placeholder values with your actual configuration:
+### 3. .env Dosyasını Oluşturma
 
-    ```env
-    # Google Cloud Project Details
-    PROJECT_ID="your-gcp-project-id"
-    LOCATION="global" # Or your specific location e.g., "us-central1"
-    COLLECTION_ID="default_collection" # Or your specific collection
-    ENGINE_ID="your-engine-id"
-    SERVING_CONFIG_ID="default_config" # Or your specific serving config
+Proje ana dizininde `.env` adında bir dosya oluşturun ve aşağıdaki şablonu kullanarak kendi değerlerinizle doldurun:
+
+```env
+# Google Cloud Proje Bilgileri
+PROJECT_ID="your-gcp-project-id"         # Google Cloud Proje ID'niz
+LOCATION="global"                        # Kullandığınız bölge (genellikle "global" veya "us-central1" vs.)
+COLLECTION_ID="default_collection"       # Vertex AI Search koleksiyon ID'si
+ENGINE_ID="your-engine-id"               # Vertex AI Search motor ID'niz
+SERVING_CONFIG_ID="default_search"       # Serving config ID (genellikle "default_search")
+
+# Dil ve Bölge Ayarları
+LANGUAGE_CODE="en-US"                    # Sorguların dili (veya "tr-TR" gibi)
+TIME_ZONE="Europe/Istanbul"              # Zaman dilimi
+
+# API Yapılandırması
+PORT=3000                                # API'nin çalışacağı port
+API_URL="http://localhost:3000/search"   # API URL'i
+
+# Özel Yapılandırma
+PREAMBLE="Özet oluşturma için sistem talimatları buraya yazılır. Sistemin nasıl davranacağını belirten detaylı talimatlar verilebilir."
+
+# Google Service Account Bilgileri (Opsiyonel - gcloud CLI kullanamıyorsanız gereklidir)
+SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"your-project-id","private_key_id":"your-private-key-id","private_key":"-----BEGIN PRIVATE KEY-----\\nYOUR_PRIVATE_KEY_DATA_HERE\\n-----END PRIVATE KEY-----\\n","client_email":"your-service-account@your-project.iam.gserviceaccount.com","client_id":"your-client-id","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"https://www.googleapis.com/robot/v1/metadata/x509/your-service-account@your-project.iam.gserviceaccount.com","universe_domain":"googleapis.com"}'
+```
+
+#### Service Account JSON Hazırlama
+
+Eğer `gcloud CLI` kullanmak yerine Service Account ile kimlik doğrulama yapmak isterseniz:
+
+1. Google Cloud Console'a gidin: https://console.cloud.google.com
+2. Projenizi seçin
+3. "IAM & Admin" > "Service Accounts" bölümüne gidin
+4. "Create Service Account" butonuna tıklayın
+5. Service Account için bir isim ve açıklama girin
+6. "Create and Continue" butonuna tıklayın
+7. Role olarak "Discovery Engine Service Agent", "Discovery Engine Viewer" ve "Discovery Engine Editor" rollerini ekleyin
+8. "Continue" ve sonra "Done" butonlarına tıklayın
+9. Oluşturulan service account'a tıklayın
+10. "Keys" sekmesine gidin ve "Add Key" > "Create new key" seçin
+11. "JSON" formatını seçin ve "Create" butonuna tıklayın
+12. İndirilen JSON dosyasının içeriğini .env dosyasındaki SERVICE_ACCOUNT_JSON değişkenine tek tırnak içinde ekleyin
+
+    - NOT: JSON içindeki tüm çift tırnaklar korunmalıdır
+    - NOT: JSON içindeki yeni satır karakterleri `\\n` olarak yazılmalıdır (yukarıdaki örneğe bakın)
+      SERVING_CONFIG_ID="default_config" # Or your specific serving config
 
     # Search Configuration
+
     LANGUAGE_CODE="en" # Or your desired language code e.g., "tr"
     TIME_ZONE="UTC" # Or your desired time zone e.g., "America/New_York", "Europe/Istanbul"
     PREAMBLE="Provide a concise answer to the user\'s query based on the search results." # Customize as needed
 
     # API Server Port (Optional, defaults to 3000 if not set)
+
     # PORT=3000
+
     ```
 
     **Important:** Ensure that `.env` is listed in your `.gitignore` file to prevent committing sensitive credentials to your repository. If it's not, add `.env` to a new line in `.gitignore`.
+    ```
 
 ## Running the API
 

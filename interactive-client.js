@@ -1,10 +1,11 @@
+require("dotenv").config();
 const axios = require("axios");
 const readline = require("readline").createInterface({
   input: process.stdin,
   output: process.stdout,
 });
 
-const API_URL = "http://localhost:3000/search";
+const API_URL = process.env.API_URL || "http://localhost:3000/search";
 
 async function search(query) {
   if (!query || query.trim() === "") {
